@@ -6,6 +6,7 @@ VALUES
     ('America/Los_Angeles')
 ON CONFLICT ("name") DO NOTHING;
 
+SELECT *FROM "timezones";
 
 /*------ ADDING USERS ---------*/
 CALL add_user (
@@ -24,6 +25,34 @@ CALL add_user ('james', 'james@hotmail.com', '1234', null, null, null, null, nul
 CALL add_user ('brian', 'brian@sapo.pt', '1234', 'brian_image.png', null, 'male', null, 2);
 CALL add_user ('Anna', 'Anna@protonmail.com', '1234', 'Anna_image.png', null, null, '1978-01-01', 1);
 CALL add_user ('Katherine', 'Kat@gmail.com', '1234', null, 'Kat_banner.jep', 'female', '1999-01-01', null);
+CALL add_user ('user_to_ban_1', 'user_to_ban_1@gmail.com', '1234', null, null, null, null, null);
+CALL add_user ('user_to_ban_2', 'user_to_ban_2@gmail.com', '1234', null, null, null, null, null);
+
+
+UPDATE "users" SET "admin" = TRUE WHERE "username" = 'brian';
+
+SELECT * FROM USERS;
+
+
+/*---------------- DELETE USER (and their images)-------------------*/
+DO $$
+DECLARE
+    "uid" INTEGER;
+BEGIN
+    SELECT "id" INTO uid FROM "users" WHERE "username" = 'Katherine';
+	DELETE FROM "images"
+	WHERE "id" IN (
+		SELECT "image_id" FROM "user_images" WHERE "user_id" = "uid"
+		); 
+    CALL delete_user(uid);
+	
+END;
+$$;
+
+SELECT * FROM "user_images" WHERE "user_id" not in (SELECT "id" FROM "users");
+SELECT * FROM "images" WHERE "id" not in (SELECT "image_id" FROM "user_images");
+
+
 
 /*------ ADD AND SETTING PROFILE PIC ---------*/
 DO $$
@@ -33,7 +62,7 @@ DECLARE
 BEGIN
     SELECT "id" INTO uid FROM "users" WHERE "username" = 'matt';
 	
-    CALL add_profile_pic(uid, 'matt_new_profile_pic.png');
+    CALL add_profile_pic("uid", 'matt_new_profile_pic.png');
 	
 	SELECT MAX("image_id") 	INTO "new_image_id" FROM "user_images" 
 	WHERE "user_id" = "uid" 
@@ -77,16 +106,9 @@ BEGIN
 END;
 $$;
 
-/*------ DELETE user ---------*/
-DO $$
-DECLARE
-    "uid" INTEGER;
-BEGIN
-    SELECT "id" INTO "uid" FROM "users" WHERE "username" = 'bob';
-	
-	CALL delete_user("uid");
-END;
-$$;
+SELECT * FROM "user_images" 
+WHERE "user_id" = (SELECT "id" FROM "users" WHERE "username" = 'jeff');
+
 
 
 /*------ update user profile ---------*/
@@ -99,6 +121,7 @@ BEGIN
 	CALL change_profile('My name is Jeff', "uid");
 END;
 $$;
+
 
 
 /*------ Request, Accepet, Refuse and mute friends ---------*/
@@ -132,16 +155,17 @@ BEGIN
 END;
 $$;
 
+
+SELECT * FROM "friends";
+
+
+
 /*------ GET USER FRIENDS -------*/
-DO $$
-DECLARE
-    "uid" INTEGER;
-BEGIN
-    SELECT "id" INTO "uid" FROM "users" WHERE "username" = 'jeff';
-	
-	PERFORM * FROM get_friends("uid",1);
-END;
-$$;
+
+SELECT * FROM get_friends(
+	(SELECT "id" FROM "users" WHERE "username" = 'jeff'),
+	0);
+
 
 
 /*------------ BLOCK UNBLOCK USERS -----------*/
@@ -161,25 +185,29 @@ BEGIN
 
 END;
 $$;
+SELECT * FROM "blocks";
 
-
-/*------------ Post | Edit | DELETE Comment -----------*/
+/*------------ Post | Edit | Delete POST -----------*/
 DO $$
 DECLARE
     "u1id" INTEGER;
 	"u2id" INTEGER;
 	"u3id" INTEGER;
 	"post_id" INTEGER;
+	"user_to_ban_1_id" INTEGER;
 BEGIN
     SELECT "id" INTO "u1id" FROM "users" WHERE "username" = 'jeff';
 	SELECT "id" INTO "u2id" FROM "users" WHERE "username" = 'matt';
 	SELECT "id" INTO "u3id" FROM "users" WHERE "username" = 'john';
+	SELECT "id" INTO "user_to_ban_1_id" FROM "users" WHERE "username" = 'user_to_ban_1';
 	
 	CALL post_post("u1id", 'This is petty cool');
 	CALL post_post("u1id", 'This is petty cool');
 	CALL post_post("u1id", 'It was a terrible idea to make everything a procedure');
 	CALL post_post("u1id", 'Do you think anyone will see this');
-	CALL post_post("u1id", 'I am saying sth racist');
+	CALL post_post("u1id", 'I love spamming');
+	CALL post_post("u2id", 'I am sayning sth bad but not worth a report');
+	CALL post_post("user_to_ban_1_id", 'I am super racist');
 
 	CALL post_post("u2id", 'I whish i was rich');
 	CALL post_post("u2id", 'I am saying sth age restricted');
@@ -200,8 +228,24 @@ BEGIN
 END;
 $$;
 
+SELECT * FROM "posts";
 
-/*------------ Post | Edit | DELETE Comment -----------*/
+
+SELECT 
+	"notifications"."user_id" AS "notification_user_id",
+	"posts"."user_id" AS "post_user_id",
+	"friends"."user_id" AS "friends_user_id",
+	"friends"."muted"
+FROM "posts"
+LEFT JOIN "friends"
+ON "friends"."friend_id" = "posts"."user_id"
+LEFT JOIN "notifications"
+ON "posts"."id" = "notifications"."post_id" AND "notifications"."user_id" = "friends"."user_id"
+WHERE "friends"."user_id" is not null;
+
+
+
+/*------------ Post | Edit | Delete COMMENTS -----------*/
 DO $$
 DECLARE
     "u1id" INTEGER;
@@ -212,10 +256,12 @@ DECLARE
 	"comment1_id" INTEGER;
 	"comment2_id" INTEGER;
 	"comment_to_delete_id" INTEGER;
+	"user_to_ban_2_id" INTEGER;
 BEGIN
     SELECT "id" INTO "u1id" FROM "users" WHERE "username" = 'jeff';
 	SELECT "id" INTO "u2id" FROM "users" WHERE "username" = 'matt';
 	SELECT "id" INTO "u3id" FROM "users" WHERE "username" = 'john';
+	SELECT "id" INTO "user_to_ban_2_id" FROM "users" WHERE "username" = 'user_to_ban_2';
 	SELECT MIN("id") INTO "post1_id" FROM "posts" WHERE "user_id" = "u1id" GROUP BY "user_id";
 	SELECT MIN("id") INTO "post2_id" FROM "posts" WHERE "user_id" = "u2id" GROUP BY "user_id";
 
@@ -225,6 +271,9 @@ BEGIN
 	CALL post_comment("u2id", "post1_id", 'What a great post');
 	CALL post_comment("u3id", "post2_id", 'What time is it');
 	CALL post_comment("u1id", "post1_id", 'my name is jeff');
+	CALL post_comment("u1id", "post2_id", 'I love spamming');
+	CALL post_comment("u2id", "post1_id", 'I am sayning sth bad but not worth a report');
+	CALL post_comment("user_to_ban_2_id", "post2_id", 'I am super racist');
 
 	SELECT MIN("id") INTO "comment1_id" FROM "comments" WHERE "post_id" = "post1_id";
 	SELECT MIN("id") INTO "comment2_id" FROM "comments" WHERE "post_id" = "post2_id";
@@ -247,11 +296,17 @@ BEGIN
 	WHERE "user_id" = "u1id"
 	GROUP BY "user_id";
 	
-	CALL edit_comment("comment1_id", "u1id", 'this post was edited');
+	CALL edit_comment("comment1_id", "u1id", 'this comment was edited');
 	
 END;
 $$;
 
+SELECT * FROM "comments";
+
+
+
+
+/* --------------- ADDING REACTIONS -----------------*/
 INSERT INTO "reactions"("name", "icon")
 VALUES
 	('like','like_icon.png'),
@@ -283,10 +338,10 @@ BEGIN
 	SELECT "id" INTO "reaction1_id" FROM "reactions" WHERE "name" = 'like';
 	SELECT "id" INTO "reaction2_id" FROM "reactions" WHERE "name" = 'angry';
 	SELECT "id" INTO "reaction3_id" FROM "reactions" WHERE "name" = 'sleepy';
-	SELECT "id" INTO "post1_id" FROM "posts" LIMIT 1;
-	SELECT "id" INTO "post2_id" FROM "posts" LIMIT 1;
-	SELECT "id" INTO "comment1_id" FROM "comments" LIMIT 1;
-	SELECT "id" INTO "comment2_id" FROM "comments" LIMIT 1;
+	SELECT "id" INTO "post1_id" FROM "posts" ORDER BY RANDOM() LIMIT 1;
+	SELECT "id" INTO "post2_id" FROM "posts" ORDER BY RANDOM() LIMIT 1;
+	SELECT "id" INTO "comment1_id" FROM "comments" ORDER BY RANDOM() LIMIT 1;
+	SELECT "id" INTO "comment2_id" FROM "comments" ORDER BY RANDOM() LIMIT 1;
 
 	CALL add_reaction_to_post("post1_id", "u1id", "reaction1_id");
 	CALL add_reaction_to_post("post2_id", "u2id", "reaction2_id");
@@ -304,7 +359,10 @@ BEGIN
 END;
 $$;	
 
-/*--------- get feed to a specific user ---------*/
+SELECT * FROM "post_reactions";
+SELECT * FROM "comment_reactions";
+
+/*--------- get user feed, post comments and comments comments and their reaction ---------*/
 SELECT * FROM get_feed(
     (SELECT id FROM "users" WHERE "username" = 'jeff'),
     0
@@ -322,27 +380,180 @@ SELECT * FROM get_post_comments(
 	0	
 );
 
-SELECT * FROM get_comments_comments(
-	(SELECT "comments"."id" FROM "comments"
+SELECT * FROM get_comment_comments(
+	(SELECT "c2"."id" FROM "comments" AS "c1"
 			INNER JOIN "comments" AS "c2"
-			ON "comments"."id" = "comments"."comment_id"
-		GROUP BY "comments"."id"
+			ON "c2"."id" = "c1"."comment_id"
+		GROUP BY "c2"."id"
 		ORDER BY COUNT(*) DESC
 		LIMIT 1),
 	0	
 );
 
 
+SELECT * FROM get_post_reactions(
+	(SELECT "id" FROM posts
+		ORDER BY RANDOM()
+		LIMIT 1
+	)	
+);
+SELECT * FROM get_comment_reactions(
+	(SELECT "id" FROM posts
+		ORDER BY RANDOM()
+		LIMIT 1
+	)	
+);
 
 
+/*------------ Report Comment and Post -----------*/
+DO $$
+DECLARE
+    "u1id" INTEGER;
+	"u2id" INTEGER;
+	"u3id" INTEGER;
+	"p1_id" INTEGER;
+	"p2_id" INTEGER;
+	"p3_id" INTEGER;
+	"c1_id" INTEGER;
+	"c2_id" INTEGER;
+	"c3_id" INTEGER;
+BEGIN
+    SELECT "id" INTO "u1id" FROM "users" WHERE "username" = 'jeff';
+	SELECT "id" INTO "u2id" FROM "users" WHERE "username" = 'matt';
+	SELECT "id" INTO "u3id" FROM "users" WHERE "username" = 'john';
+	SELECT "id" INTO "p1_id" FROM "posts" WHERE "content" LIKE '%racist%';
+	SELECT "id" INTO "p2_id" FROM "posts" WHERE "content" LIKE '%spamming%';
+	SELECT "id" INTO "p3_id" FROM "posts" WHERE "content" LIKE 'I am sayning sth bad but not worth a report';
+
+	SELECT "id" INTO "c1_id" FROM "comments" WHERE "content" LIKE '%racist%';
+	SELECT "id" INTO "c2_id" FROM "comments" WHERE "content" LIKE '%spamming%';
+	SELECT "id" INTO "c3_id" FROM "comments" WHERE "content" LIKE 'I am sayning sth bad but not worth a report';
+	
+	CALL add_report_post("u1id", "p1_id", 'Hate Speech',  'this post is very racist');
+	CALL add_report_post("u2id", "p1_id", 'Hate Speech',  'how isnt this post deleted yet are the mod asleep');
+	CALL add_report_post("u3id", "p1_id", 'Hate Speech',  'ban the user');
+
+	CALL add_report_comment("u1id", "c1_id", 'Hate Speech',  'this post is very racist');
+	CALL add_report_comment("u2id", "c1_id", 'Hate Speech',  'how isnt this post deleted yet are the mod asleep');
+	CALL add_report_comment("u3id", "c1_id", 'Hate Speech',  'ban the user');
 
 
-SELECT * FROM comments;
-DELETE FROM comments;
-SELECT * FROM post_reactions;
-SELECT * FROM get_friends(31,1);
-SELECT * FROM friends;
-SELECT * FROM users;
-SELECT * FROM user_images;
+	CALL add_report_post("u1id", "p2_id", 'Spam',  'this is spam');
+	CALL add_report_post("u2id", "p2_id", 'Spam',  'He keeps spamming');
+
+
+	CALL add_report_comment("u1id", "c2_id", 'Spam',  'this is spam');
+	CALL add_report_comment("u2id", "c2_id", 'Spam',  'He keeps spamming');
+
+	CALL add_report_post("u1id", "p3_id", 'other',  'I feel offended');
+
+	CALL add_report_comment("u2id", "c3_id", 'other',  'I fell offended');
+
+END;
+$$;
+
+
+SELECT * FROM "reports"
+INNER JOIN "comment_reports"
+ON "comment_reports"."report_id" = "reports"."id";
+
+
+SELECT * FROM "reports"
+INNER JOIN "post_reports"
+ON "post_reports"."report_id" = "reports"."id";
+
+
+/* ------------- CHECK pending reports  ------------ */
+
+SELECT "content_type", "content_id", "report_count"
+FROM (
+	SELECT 
+	    'post' AS "content_type",
+	    "post_id" AS "content_id",
+	    COUNT(*) AS "report_count"
+	FROM "post_reports"
+	INNER JOIN "reports"
+		ON "reports"."id" = "post_reports"."report_id"
+	WHERE "reports"."status" != 'Closed'
+	GROUP BY "post_id"
+	UNION ALL
+	SELECT 
+	    'comment' AS "content_type",
+	    "comment_id" AS "content_id",
+	    COUNT(*) AS "report_count"
+	FROM "comment_reports"
+	INNER JOIN "reports"
+		ON "reports"."id" = "comment_reports"."report_id"
+	WHERE "reports"."status" != 'closed'
+	GROUP BY "comment_id"
+) AS "combined_reports"
+ORDER BY "report_count" DESC;
+
+
+/* --------------------- HANDLE REPORTS -------------------------*/
+DO $$
+DECLARE
+    "admin_id" INTEGER;
+	"rp1_id" INTEGER;
+	"rp2_id" INTEGER;
+	"rp3_id" INTEGER;
+	"rc1_id" INTEGER;
+	"rc2_id" INTEGER;
+	"rc3_id" INTEGER;
+BEGIN
+    SELECT MIN("id") INTO "admin_id" FROM "users" WHERE "admin" = TRUE;
+	
+	SELECT "id" INTO "rp1_id" FROM "reports" 
+	WHERE "identifier" = 'posts'
+	AND "type" = 'Hate Speech'
+	ORDER BY random()
+	LIMIT 1;
+	
+	SELECT "id" INTO "rp2_id" FROM "reports" 
+	WHERE "identifier" = 'posts'
+	AND "type" = 'Spam'
+	ORDER BY random()
+	LIMIT 1;
+	
+	SELECT "id" INTO "rp3_id" FROM "reports" 
+	WHERE "identifier" = 'posts'
+	AND "type" = 'other'
+	ORDER BY random()
+	LIMIT 1;
+	
+	SELECT "id" INTO "rc1_id" FROM "reports" 
+	WHERE "identifier" = 'comments'
+	AND "type" = 'Hate Speech'
+	ORDER BY random()
+	LIMIT 1;
+	
+	SELECT "id" INTO "rc2_id" FROM "reports" 
+	WHERE "identifier" = 'comments'
+	AND "type" = 'Spam'
+	ORDER BY random()
+	LIMIT 1;
+	
+	SELECT "id" INTO "rc3_id" FROM "reports" 
+	WHERE "identifier" = 'comments'
+	AND "type" = 'other'
+	ORDER BY random()
+	LIMIT 1;
+
+
+	CALL report_handling("admin_id", "rp1_id", True, True);
+	CALL report_handling("admin_id", "rp2_id", True, False);
+	CALL report_handling("admin_id", "rp3_id", False, False);
+	CALL report_handling("admin_id", "rc1_id", True, True);
+	CALL report_handling("admin_id", "rc2_id", True, False);
+	CALL report_handling("admin_id", "rc3_id", False, False);
+	
+END;
+$$;
+
+SELECT * FROM reports;
+SELECT * FROM post_reports;
+SELECT * FROM comment_reports;
+
+SELECT * FROM get_content_report('posts', 6, true);
 
 

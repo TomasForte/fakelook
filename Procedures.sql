@@ -54,6 +54,28 @@ END;
 $$;
 
 
+CREATE PROCEDURE log_in (
+			"_username_email" VARCHAR(30),
+			"_password" VARCHAR(50),
+			OUT "logged_in" BOOLEAN
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+	IF EXISTS(
+		SELECT 1 FROM "users" 
+		WHERE "password" = "_password"
+		AND ("username" = "_username_email" OR "email" = "_username_email")
+		AND "banned" = FALSE
+	) THEN
+		"logged_in" := TRUE;
+	ELSE
+        "logged_in" := FALSE;
+    END IF;
+END;
+$$;
+
+
 
 CREATE PROCEDURE add_profile_pic (
 	"_user_id" INTEGER,
@@ -136,7 +158,7 @@ LANGUAGE plpgsql
 AS $$
 BEGIN
 	DELETE FROM "images" 
-	WHERE id = "_image_id"
+	WHERE "id" = "_image_id"
 	  AND EXISTS (
 	      SELECT 1 FROM user_images
 	      WHERE user_id = _user_id AND image_id = _image_id
@@ -499,7 +521,7 @@ $$;
 
 CREATE FUNCTION get_feed (
 			"_user_id" INTEGER,
-			"page" INTEGER
+			"_page" INTEGER
 )
 RETURNS TABLE (    
 	"post_id" INTEGER,
@@ -527,7 +549,7 @@ BEGIN
 		)
 	AND NOT "posts"."user_id" = "_user_id"
 	ORDER BY "posts"."created_at" DESC
-	OFFSET "page"*20
+	OFFSET "_page"*20
 	LIMIT 20;
 END;
 $$;
@@ -536,7 +558,7 @@ $$;
 
 CREATE FUNCTION get_post_comments (
 			"_post_id" INTEGER,
-			"page" INTEGER
+			"_page" INTEGER
 )
 RETURNS TABLE (    
 	"comment_id" INTEGER,
@@ -562,7 +584,7 @@ BEGIN
 	WHERE "comments"."post_id" = "_post_id"
 	AND "comments"."comment_id" is null
 	ORDER BY "comments"."created_at" DESC
-	OFFSET "page"*20
+	OFFSET "_page"*20
 	LIMIT 20;
 END;
 $$;
@@ -571,7 +593,7 @@ $$;
 
 CREATE FUNCTION get_comment_comments (
 			"_comment_id" INTEGER,
-			"page" INTEGER
+			"_page" INTEGER
 )
 RETURNS TABLE (    
 	"comment_id" INTEGER,
@@ -596,7 +618,7 @@ BEGIN
 		ON "users"."profile_pic_id" = "images"."id" 
 	WHERE "comments"."comment_id" = "_comment_id"
 	ORDER BY "comments"."created_at" DESC
-	OFFSET "page"*20
+	OFFSET "_page"*20
 	LIMIT 20;
 END;
 $$;
@@ -609,24 +631,24 @@ CREATE FUNCTION get_post_reactions (
 RETURNS TABLE (    
 	"post_id" INTEGER,
 	"reaction_id" INTEGER,
-	"reaction_icon" TEXT,
-    "reaction_total" INTEGER)
+	"reaction_icon" VARCHAR,
+    "reaction_total" BIGINT)
 LANGUAGE plpgsql
 AS $$
 BEGIN
 	RETURN QUERY
 	SELECT 
-		"post_id",
-		"reaction"."id",
-		"reaction"."icon",
+		"posts"."id",
+		"reactions"."id",
+		"reactions"."icon",
 		COUNT(*) AS "reaction_total"
 	FROM "posts"
-	LEFT JOIN "post_reactions"
+	INNER JOIN "post_reactions"
 		ON "post_reactions"."post_id" = "posts"."id"
-	LEFT JOIN "reactions"
+	INNER JOIN "reactions"
 		ON "reactions"."id" = "post_reactions"."reaction_id"
-	WHERE "posts"."post_id" = "_post_id"
-	GROUP BY "reaction_id";
+	WHERE "posts"."id" = "_post_id"
+	GROUP BY "posts"."id", "reactions"."id", "reactions"."icon";
 END;
 $$;
 
@@ -638,70 +660,226 @@ CREATE FUNCTION get_comment_reactions (
 RETURNS TABLE (    
 	"comment_id" INTEGER,
 	"reaction_id" INTEGER,
-	"reaction_icon" TEXT,
-    "reaction_total" INTEGER)
+	"reaction_icon" VARCHAR,
+    "reaction_total" BIGINT)
 LANGUAGE plpgsql
 AS $$
 BEGIN
 	RETURN QUERY
 	SELECT 
-		"comment_id",
-		"reaction"."id",
-		"reaction"."icon",
+		"comments"."id",
+		"reactions"."id",
+		"reactions"."icon",
 		COUNT(*) AS "reaction_total"
 	FROM "comments"
-	LEFT JOIN "comment_reactions"
-		ON "comment_reactions"."post_id" = "comments"."id"
-	LEFT JOIN "reactions"
-		ON "reactions"."id" = "post_reactions"."reaction_id"
-	WHERE "comments"."post_id" = "_post_id"
-	GROUP BY "reaction_id";
+	INNER JOIN "comment_reactions"
+		ON "comment_reactions"."comment_id" = "comments"."id"
+	INNER JOIN "reactions"
+		ON "reactions"."id" = "comment_reactions"."reaction_id"
+	WHERE "comments"."id" = "_comment_id"
+	GROUP BY "comments"."id", "reactions"."id", "reactions"."icon";
 END;
 $$;
 
 
 
-CREATE PROCEDURE add_report_post(
-    user_id INTEGER,
-    post_id INTEGER,
-    type VARCHAR(30),
-    message TEXT
+CREATE PROCEDURE "add_report_post"(
+    "_user_id" INTEGER,
+    "_post_id" INTEGER,
+    "_type" VARCHAR(30),
+    "_message" TEXT
 )
 LANGUAGE plpgsql
 AS $$
 DECLARE
-    report_id INTEGER;
+    "_report_id" INTEGER;
 BEGIN
-    INSERT INTO reports(type, message)
-    VALUES (type, message)
-    RETURNING id INTO report_id;
-
-    INSERT INTO post_reports(user_id, post_id, report_id)
-    VALUES (user_id, post_id, report_id);
+	IF NOT EXISTS(
+		SELECT 1 FROM "post_reports" WHERE "user_id" = "_user_id" AND "post_id" = "_post_id"
+	) THEN
+	    INSERT INTO "reports"("type", "message", "identifier")
+	    VALUES ("_type", "_message", 'posts')
+	    RETURNING id INTO "_report_id";
+	
+	    INSERT INTO "post_reports"("user_id", "post_id", "report_id")
+	    VALUES ("_user_id", "_post_id", "_report_id");
+	END IF;
 END;
 $$;
 
 
 
-CREATE PROCEDURE add_report_comment(
-    user_id INTEGER,
-    comment_id INTEGER,
-    type VARCHAR(30),
-    message TEXT
+CREATE PROCEDURE "add_report_comment"(
+    "_user_id" INTEGER,
+    "_comment_id" INTEGER,
+    "_type" VARCHAR(30),
+    "_message" TEXT
 )
 LANGUAGE plpgsql
 AS $$
 DECLARE
-    report_id INTEGER;
+    "_report_id" INTEGER;
 BEGIN
-    INSERT INTO reports(type, message)
-    VALUES (type, message)
-    RETURNING id INTO report_id;
-
-    INSERT INTO comment_reports(user_id, comment_id, report_id)
-    VALUES (user_id, comment_id, report_id);
+	IF NOT EXISTS(
+		SELECT 1 FROM "comment_reports" WHERE "user_id" = "_user_id" AND "comment_id" = "_comment_id"
+	) THEN
+	    INSERT INTO "reports"("type", "message", "identifier")
+	    VALUES ("_type", "_message", 'comments')
+	    RETURNING id INTO "_report_id";
+	
+	    INSERT INTO "comment_reports"("user_id", "comment_id", "report_id")
+	    VALUES ("_user_id", "_comment_id", "_report_id");
+	END IF;
 END;
 $$;
 
 
 
+CREATE PROCEDURE "report_handling"(
+    "_user_id" INTEGER,
+    "_report_id" INTEGER,
+	"_remove" BOOLEAN,
+	"_ban" BOOLEAN
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    "_identifier" VARCHAR(30);
+	"_content_id" INTEGER;
+	"_content_user_id" INTEGER;
+	"_action" VARCHAR(20) := 'No Violation';
+BEGIN
+
+	SELECT "identifier" INTO "_identifier" 
+	FROM "reports" 
+	WHERE "id" = "_report_id" AND "status" != 'Closed';
+	
+	IF (
+		(SELECT "admin" FROM "users" WHERE "id" = "_user_id")
+		AND "_identifier" IS NOT NULL
+	) THEN
+		
+		IF "_remove" = true THEN
+			
+			"_action" := 'Content Removed';
+		END IF;
+
+		IF "_ban" = true THEN
+			UPDATE "users"
+			SET "banned" = true
+			WHERE "id" = "_content_user_id";
+
+			"_action" := 'Banned';
+		END IF;
+
+
+		/*update every report to that post/comment*/
+		IF ("_identifier" = 'comments') THEN
+		
+			SELECT "comment_id" INTO "_content_id" 
+			FROM "comment_reports" 
+			WHERE "report_id" = "_report_id";
+
+			SELECT "user_id" INTO "_content_user_id"
+			FROM "comments"
+			WHERE "id" = "_content_id";
+
+			
+			UPDATE "reports" 
+			SET 
+				"resolved_at" = CURRENT_TIMESTAMP, 
+				"status" = 'Closed',
+				"action" = "_action"
+			WHERE "id" IN (
+				SELECT "report_id" FROM "comment_reports"
+				WHERE "comment_id" = "_content_id"
+			);
+
+			/*I must delete the content after the update otherwise I won't be able to batch
+			update the reports for that content since they were deleted*/
+			IF "_remove" = true THEN
+				DELETE FROM "comments" WHERE "id" = "_content_id";
+			END IF;
+
+
+			
+		ELSIF ("_identifier" = 'posts') THEN
+			SELECT "post_id" INTO "_content_id" 
+			FROM "post_reports" 
+			WHERE "report_id" = "_report_id";
+
+			SELECT "user_id" INTO "_content_user_id"
+			FROM "posts"
+			WHERE "id" = "_content_id";
+
+
+		
+			UPDATE "reports" 
+			SET 
+				"resolved_at" = CURRENT_TIMESTAMP, 
+				"status" = 'Closed',
+				"action" = "_action"
+			WHERE "id" IN (
+				SELECT "report_id" FROM "post_reports"
+				WHERE "post_id" = "_content_id"
+			);	
+
+			/*I must delete the content after the update otherwise I won't be able to batch
+			update the reports for that content since they were deleted*/
+			IF "_remove" = true THEN
+				DELETE FROM "posts" WHERE "id" = "_content_id";
+			END IF;
+	
+		ELSE
+			RAISE NOTICE 'content type is wrong';
+		END IF;	
+	ELSE
+		RAISE NOTICE 'user is not admin or type of  content is wrong';
+	
+	END IF;
+END;
+$$;
+
+
+	
+
+
+CREATE OR REPLACE FUNCTION "get_content_report"(
+	"identifier" VARCHAR(30),
+	"content_id" INTEGER,
+	"show_closed" BOOLEAN
+)
+RETURNS TABLE (
+	"report_id" INTEGER,
+    "message" VARCHAR(255),
+    "type" VARCHAR(30)
+)
+AS $$
+BEGIN
+
+	IF "identifier" = 'comments' THEN
+		RETURN QUERY
+		SELECT 
+			"reports"."id",
+			"reports"."message",
+			"reports"."type"
+		FROM "reports"
+		INNER JOIN "comment_reports"
+			ON "comment_reports"."report_id" = "reports"."id"
+		WHERE "comment_reports"."comment_id" = "content_id"
+			AND ("show_closed" OR "reports"."status" != 'Closed');
+	ELSIF "identifier" = 'posts' THEN
+		RETURN QUERY
+		SELECT 
+			"reports"."id",
+			"reports"."message",
+			"reports"."type"
+		FROM "reports"
+		INNER JOIN "post_reports"
+			ON "post_reports"."report_id" = "reports"."id"
+		WHERE "post_reports"."post_id" = "content_id"
+			AND ("show_closed" OR "reports"."status" != 'Closed');
+	END IF;
+
+END;
+$$ LANGUAGE plpgsql;
