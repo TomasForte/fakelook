@@ -340,8 +340,8 @@ BEGIN
 	RETURN NEW;
 END;
 $$;
-CREATE TRIGGER "trg_update_comment_edited_timestampe"
-AFTER UPDATE ON "comments"
+CREATE TRIGGER "trg_update_comment_edited_timestamp"
+BEFORE UPDATE ON "comments"
 FOR EACH ROW
 EXECUTE FUNCTION "update_comment_edited_timestamp"();
 

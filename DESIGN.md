@@ -1,3 +1,5 @@
+Video Demo: https://youtu.be/x3hQPuKGHDM
+
 ## Overview
 
 “Fakelook” is a relational database designed for a simple social media platform. It allows users to:
